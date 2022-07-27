@@ -18,7 +18,7 @@ function MediocreText({
   onValue,
 }: {
   value: TextContent;
-  onValue?: (value: TextContent) => void;
+  onValue: (value: TextContent) => void;
 }) {
   const [selection, setSelection] = useState<null | {
     start: number;
@@ -173,7 +173,7 @@ function MediocreText({
             const firstToggleNode = newValue.find(
               (n) => n.key === keysOfToggleNode[0]
             );
-            let isBolding = !firstToggleNode.bold;
+            let isBolding = !firstToggleNode?.bold;
 
             // apply the new bold value to newValue[keysOfToggleNode]
             keysOfToggleNode.forEach((toggleNodeKey) => {
