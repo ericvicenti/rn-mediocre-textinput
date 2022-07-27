@@ -1,46 +1,52 @@
-import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import Delta from "quill-delta";
+import { useCallback, useState } from "react";
 import { Button, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
-type RichString = { key: string; t: string; bold?: boolean };
-type TextContent = Array<RichString>;
+type CustomAttributes = {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strikethrough: boolean;
+};
 
-let nodeKeyCountId = 0;
-const timeId = Date.now();
-function getNodeKey() {
-  nodeKeyCountId += 1;
-  return `${timeId}_${nodeKeyCountId}`;
+type Selection = {
+  start: number;
+  end: number;
+};
+
+function useAttributeCallback(
+  delta: Delta,
+  onDelta: (d: Delta) => void,
+  selection: Selection,
+  attribute: keyof CustomAttributes
+) {
+  return useCallback(() => {
+    const prevFirstCharDelta = delta.slice(
+      selection.start,
+      selection.start + 1
+    );
+    const prevFirstCharOp = prevFirstCharDelta.ops[0];
+    const wasApplied = !!prevFirstCharOp?.attributes?.[attribute];
+    const newDelta = new Delta()
+      .retain(selection.start)
+      .retain(selection.end - selection.start, { [attribute]: !wasApplied });
+    onDelta(delta.compose(newDelta));
+  }, [delta, onDelta, selection, attribute]);
 }
 
 function MediocreText({
-  value,
-  onValue,
+  delta,
+  onDelta,
 }: {
-  value: TextContent;
-  onValue?: (value: TextContent) => void;
+  delta: Delta;
+  onDelta: (d: Delta) => void;
 }) {
-  const [selection, setSelection] = useState<null | {
-    start: number;
-    end: number;
-  }>(null);
+  const [selection, setSelection] = useState<null | Selection>(null);
   return (
-    <SafeAreaView
-      style={{
-        alignSelf: "stretch",
-      }}
-    >
+    <SafeAreaView style={styles.safeArea}>
       <TextInput
-        style={{
-          borderWidth: 1,
-          borderColor: "#ccc",
-          padding: 8,
-          paddingVertical: 12,
-          borderRadius: 8,
-          borderBottomRightRadius: 0,
-          borderBottomLeftRadius: 0,
-          minHeight: 120,
-        }}
+        style={styles.textInput}
         multiline
         onSelectionChange={(e) => {
           setSelection(e.nativeEvent.selection);
@@ -48,151 +54,65 @@ function MediocreText({
         onBlur={() => {
           setSelection(null);
         }}
+        // selection={{ ...selection }}
         onTextInput={(e) => {
-          const { previousText, text, range } = e.nativeEvent;
-          console.log("Raw text event", {
-            text,
-            // previousText,
-            start: range.start,
-            end: range.end,
-          });
-          const newValue = [...value];
-          if (newValue.length === 0) {
-            onValue([{ t: text, key: getNodeKey() }]);
-            return;
-          }
-
-          let editingNode: null | number = null;
-          let editingTestIndex = 0;
-          let editingTestChar = 0;
-
-          while (editingNode === null) {
-            const testNode = newValue[editingTestIndex];
-            if (
-              range.start >= editingTestChar &&
-              range.end <= editingTestChar + testNode.t.length
-            ) {
-              editingNode = editingTestIndex;
-            }
-            editingTestIndex += 1;
-            editingTestChar += testNode.t.length;
-          }
-
-          const node = newValue[editingNode];
-          let newText = node.t;
-          newText = `${node.t.slice(
-            0,
-            range.start - editingTestChar
-          )}${text}${node.t.slice(range.end - editingTestChar)}`;
-          newValue[editingNode] = {
-            ...node,
-            t: newText,
-            key: getNodeKey(),
-          };
-          onValue(newValue);
+          const { text, range } = e.nativeEvent;
+          const newDelta = new Delta()
+            .retain(range.start)
+            .delete(range.end - range.start)
+            .insert(text);
+          onDelta(delta.compose(newDelta));
         }}
       >
-        {value.map((textContent) => {
-          return (
-            <Text
-              key={textContent.key}
-              style={{
-                fontWeight: textContent.bold ? "bold" : "normal",
-              }}
-            >
-              {textContent.t}
-            </Text>
-          );
+        {delta.map((op, index) => {
+          if (typeof op.insert === "string") {
+            const { bold, italic, strikethrough, underline } =
+              op.attributes || {};
+            return (
+              <Text
+                key={index}
+                style={{
+                  fontWeight: bold ? "bold" : "normal",
+                  fontStyle: italic ? "italic" : "normal",
+                  textDecorationLine: underline
+                    ? strikethrough
+                      ? "underline line-through"
+                      : "underline"
+                    : strikethrough
+                    ? "line-through"
+                    : "none",
+                }}
+              >
+                {op.insert}
+              </Text>
+            );
+          } else {
+            return null;
+          }
         })}
+        <Text />
       </TextInput>
-      <View
-        style={{
-          borderWidth: 1,
-          borderTopWidth: 0,
-          minHeight: 30,
-          backgroundColor: "#eee",
-          borderBottomRightRadius: 8,
-          borderBottomLeftRadius: 8,
-          borderColor: "#ccc",
-        }}
-      >
+      <View style={styles.toolbar}>
         <Button
           title="Bold"
-          onPress={() => {
-            const newValue = [...value];
-
-            if (!selection || selection.start === selection.end) {
-              alert("Empty selection not supported yet.");
-              return;
-            }
-            if (newValue.length === 0) {
-              alert("Empty value is not supported yet.");
-              return;
-            }
-
-            let keysOfToggleNode: Array<string> = [];
-
-            let selectionStartNode: null | number = null;
-            let selectionStartTestIndex = 0;
-            let selectionStartTestChar = 0;
-
-            while (selectionStartNode === null) {
-              const testNode = newValue[selectionStartTestIndex];
-              if (
-                selection.start >= selectionStartTestChar &&
-                selection.end < selectionStartTestChar + testNode.t.length
-              ) {
-                selectionStartNode = selectionStartTestIndex;
-              }
-              selectionStartTestIndex += 1;
-              selectionStartTestChar += testNode.t.length;
-            }
-
-            // prepare the newValue to have appropriate slicing
-            // TODO!
-
-            let considerationNodeIndex = 0;
-            let considerationNode = newValue[considerationNodeIndex];
-
-            let selectionOffset = 0;
-
-            // identify keysOfToggleNode
-            // for () {
-
-            if (
-              selectionOffset === selection.start &&
-              considerationNode.t.length === selection.end
-            ) {
-              console.log("You have selected node: ", considerationNode.key);
-              keysOfToggleNode.push(considerationNode.key);
-            }
-
-            // }
-
-            // are we bolding or unbolding?
-            const firstToggleNode = newValue.find(
-              (n) => n.key === keysOfToggleNode[0]
-            );
-            let isBolding = !firstToggleNode.bold;
-
-            // apply the new bold value to newValue[keysOfToggleNode]
-            keysOfToggleNode.forEach((toggleNodeKey) => {
-              const toggleValueIndex = newValue.findIndex(
-                (n) => n.key === toggleNodeKey
-              );
-              newValue[toggleValueIndex] = {
-                ...newValue[toggleValueIndex],
-                bold: isBolding,
-              };
-            });
-
-            console.log("doing bolding or unboldening, ", {
-              selection,
-              value,
-            });
-
-            onValue(newValue);
-          }}
+          onPress={useAttributeCallback(delta, onDelta, selection, "bold")}
+        />
+        <Button
+          title="Italic"
+          onPress={useAttributeCallback(delta, onDelta, selection, "italic")}
+        />
+        <Button
+          title="Underline"
+          onPress={useAttributeCallback(delta, onDelta, selection, "underline")}
+        />
+        <Button
+          title="Strikethrough"
+          onPress={useAttributeCallback(
+            delta,
+            onDelta,
+            selection,
+            "strikethrough"
+          )}
         />
       </View>
     </SafeAreaView>
@@ -200,30 +120,29 @@ function MediocreText({
 }
 
 export default function App() {
-  const [inputState, setInputState] = useState<TextContent>([
-    // { key: "0", t: "Bold Text Editor. It's all or nothing, baby!" },
-    { key: "a", t: "Hello, wonderful world! " },
-    { key: "b", t: "this is bold text.", bold: true },
-    { key: "c", t: " this is normal text" },
-  ]);
-
-  const [HACKY_REGRET_KEY, setHackyRegretKey] = useState(0);
+  const [inputState, setInputState] = useState(
+    new Delta([
+      { insert: "Delta " },
+      { insert: "is awesome", attributes: { bold: true } },
+    ])
+  );
+  const [HACKY_REGRET_REMOUNT, REGRET_ME] = useState(0);
   return (
     <SafeAreaProvider>
       <View style={styles.container}>
         <Text>Try the text input:</Text>
         {/* <Button
-          title="REMOUNT"
           onPress={() => {
-            setHackyRegretKey((k) => (k += 1));
+            REGRET_ME((a) => a + 1);
           }}
+          title="FIX ME"
         /> */}
         <MediocreText
-          key={HACKY_REGRET_KEY}
-          value={inputState}
-          onValue={(value) => {
-            console.log("VALUE: ", value);
-            setInputState(value);
+          key={HACKY_REGRET_REMOUNT}
+          delta={inputState}
+          onDelta={(delta) => {
+            console.log(delta);
+            setInputState(delta);
           }}
         />
       </View>
@@ -237,5 +156,28 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
+  },
+  safeArea: {
+    alignSelf: "stretch",
+  },
+  toolbar: {
+    borderWidth: 1,
+    borderTopWidth: 0,
+    minHeight: 30,
+    backgroundColor: "#eee",
+    borderBottomRightRadius: 8,
+    borderBottomLeftRadius: 8,
+    borderColor: "#ccc",
+    flexDirection: "row",
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    padding: 8,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderBottomRightRadius: 0,
+    borderBottomLeftRadius: 0,
+    minHeight: 120,
   },
 });
