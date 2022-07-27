@@ -1,6 +1,13 @@
 import Delta from "quill-delta";
-import { useCallback, useState } from "react";
-import { Button, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useRef, useState } from "react";
+import {
+  Button,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 type CustomAttributes = {
@@ -19,23 +26,38 @@ function useAttributeCallback(
   delta: Delta,
   onDelta: (d: Delta) => void,
   selection: Selection,
-  attribute: keyof CustomAttributes
+  attribute: keyof CustomAttributes,
+  applyingAttributes: CustomAttributes,
+  setApplyingAttributes: (c: CustomAttributes) => void
 ) {
   return useCallback(() => {
-    const prevFirstCharDelta = delta.slice(
-      selection.start,
-      selection.start + 1
-    );
-    const prevFirstCharOp = prevFirstCharDelta.ops[0];
-    const wasApplied = !!prevFirstCharOp?.attributes?.[attribute];
+    const willApply = !applyingAttributes[attribute];
+    const newApplyingAttributes = {
+      ...applyingAttributes,
+      [attribute]: willApply,
+    };
+    setApplyingAttributes(newApplyingAttributes);
     const newDelta = new Delta()
       .retain(selection.start)
-      .retain(selection.end - selection.start, { [attribute]: !wasApplied });
+      .retain(selection.end - selection.start, { [attribute]: willApply });
     onDelta(delta.compose(newDelta));
-  }, [delta, onDelta, selection, attribute]);
+  }, [
+    delta,
+    onDelta,
+    selection,
+    attribute,
+    applyingAttributes,
+    setApplyingAttributes,
+  ]);
 }
+const noAttributes: CustomAttributes = {
+  bold: false,
+  italic: false,
+  strikethrough: false,
+  underline: false,
+};
 
-function MediocreText({
+function MediocreTextInput({
   delta,
   onDelta,
 }: {
@@ -43,25 +65,45 @@ function MediocreText({
   onDelta: (d: Delta) => void;
 }) {
   const [selection, setSelection] = useState<null | Selection>(null);
+  const [applyingAttributes, setApplyingAttributes] =
+    useState<CustomAttributes>(noAttributes);
+  const textInputRef = useRef<TextInput>();
   return (
     <SafeAreaView style={styles.safeArea}>
       <TextInput
         style={styles.textInput}
         multiline
         onSelectionChange={(e) => {
-          setSelection(e.nativeEvent.selection);
+          const { selection } = e.nativeEvent;
+          const isRangeSelection = selection.start !== selection.end;
+          const lastCharDelta = isRangeSelection
+            ? delta.slice(selection.start, selection.start + 1)
+            : delta.slice(selection.start - 1, selection.start);
+          const firstCharOp = lastCharDelta.ops[0];
+          const currentAppliedAttributes: CustomAttributes =
+            firstCharOp?.attributes as CustomAttributes;
+          if (currentAppliedAttributes) {
+            setApplyingAttributes(currentAppliedAttributes);
+          }
+          setSelection(selection);
         }}
+        ref={textInputRef}
         onBlur={() => {
           setSelection(null);
         }}
-        // selection={{ ...selection }}
+        // selection={Platform.select({ ios: undefined, android: selection })}
         onTextInput={(e) => {
           const { text, range } = e.nativeEvent;
           const newDelta = new Delta()
             .retain(range.start)
             .delete(range.end - range.start)
-            .insert(text);
+            .insert(text, applyingAttributes);
           onDelta(delta.compose(newDelta));
+
+          // // this works on Android only?!
+          // textInputRef.current?.setNativeProps({
+          //   selection: { start: 0, end: 1 },
+          // });
         }}
       >
         {delta.map((op, index) => {
@@ -95,23 +137,50 @@ function MediocreText({
       <View style={styles.toolbar}>
         <Button
           title="Bold"
-          onPress={useAttributeCallback(delta, onDelta, selection, "bold")}
-        />
-        <Button
-          title="Italic"
-          onPress={useAttributeCallback(delta, onDelta, selection, "italic")}
-        />
-        <Button
-          title="Underline"
-          onPress={useAttributeCallback(delta, onDelta, selection, "underline")}
-        />
-        <Button
-          title="Strikethrough"
+          color={applyingAttributes.bold ? "grey" : "blue"}
           onPress={useAttributeCallback(
             delta,
             onDelta,
             selection,
-            "strikethrough"
+            "bold",
+            applyingAttributes,
+            setApplyingAttributes
+          )}
+        />
+        <Button
+          title="Italic"
+          color={applyingAttributes.italic ? "grey" : "blue"}
+          onPress={useAttributeCallback(
+            delta,
+            onDelta,
+            selection,
+            "italic",
+            applyingAttributes,
+            setApplyingAttributes
+          )}
+        />
+        <Button
+          title="Underline"
+          color={applyingAttributes.underline ? "grey" : "blue"}
+          onPress={useAttributeCallback(
+            delta,
+            onDelta,
+            selection,
+            "underline",
+            applyingAttributes,
+            setApplyingAttributes
+          )}
+        />
+        <Button
+          title="Strikethrough"
+          color={applyingAttributes.strikethrough ? "grey" : "blue"}
+          onPress={useAttributeCallback(
+            delta,
+            onDelta,
+            selection,
+            "strikethrough",
+            applyingAttributes,
+            setApplyingAttributes
           )}
         />
       </View>
@@ -119,32 +188,60 @@ function MediocreText({
   );
 }
 
+function MediocreText({ document }: { document: Delta }) {
+  return (
+    <Text>
+      {document.map((op, index) => {
+        if (typeof op.insert === "string") {
+          const { bold, italic, strikethrough, underline } =
+            op.attributes || {};
+          return (
+            <Text
+              key={index}
+              style={{
+                fontWeight: bold ? "bold" : "normal",
+                fontStyle: italic ? "italic" : "normal",
+                textDecorationLine: underline
+                  ? strikethrough
+                    ? "underline line-through"
+                    : "underline"
+                  : strikethrough
+                  ? "line-through"
+                  : "none",
+              }}
+            >
+              {op.insert}
+            </Text>
+          );
+        } else {
+          return null;
+        }
+      })}
+    </Text>
+  );
+}
+
 export default function App() {
   const [inputState, setInputState] = useState(
     new Delta([
-      { insert: "Delta " },
-      { insert: "is awesome", attributes: { bold: true } },
+      { insert: "Hello " },
+      { insert: "working class ", attributes: { italic: true } },
+      { insert: "TextInput ", attributes: { bold: true } },
+      { insert: "on " },
+      { insert: "React Native", attributes: { bold: true, italic: true } },
     ])
   );
-  const [HACKY_REGRET_REMOUNT, REGRET_ME] = useState(0);
   return (
     <SafeAreaProvider>
       <View style={styles.container}>
-        <Text>Try the text input:</Text>
-        {/* <Button
-          onPress={() => {
-            REGRET_ME((a) => a + 1);
-          }}
-          title="FIX ME"
-        /> */}
-        <MediocreText
-          key={HACKY_REGRET_REMOUNT}
+        <MediocreTextInput
           delta={inputState}
           onDelta={(delta) => {
-            console.log(delta);
             setInputState(delta);
           }}
         />
+        <Text>Current State:</Text>
+        <MediocreText document={inputState} />
       </View>
     </SafeAreaProvider>
   );
@@ -156,6 +253,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
+    padding: 8,
   },
   safeArea: {
     alignSelf: "stretch",
@@ -179,5 +277,6 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 0,
     borderBottomLeftRadius: 0,
     minHeight: 120,
+    textAlignVertical: "top",
   },
 });
