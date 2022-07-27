@@ -201,10 +201,10 @@ function MediocreText({
 
 export default function App() {
   const [inputState, setInputState] = useState<TextContent>([
-    { key: "0", t: "Bold Text Editor. It's all or nothing, baby!" },
-    // { key: "a", t: "Hello, wonderful world!" },
-    // { key: "b", t: "this is bold text.", bold: true },
-    // { key: "c", t: " this is normal text" },
+    // { key: "0", t: "Bold Text Editor. It's all or nothing, baby!" },
+    { key: "a", t: "Hello, wonderful world! " },
+    { key: "b", t: "this is bold text.", bold: true },
+    { key: "c", t: " this is normal text" },
   ]);
 
   const [HACKY_REGRET_KEY, setHackyRegretKey] = useState(0);
